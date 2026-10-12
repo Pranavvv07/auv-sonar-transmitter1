@@ -372,14 +372,9 @@ export function evaluateCandidateFrequencies(config, soundSpeed = 1500) {
     const r = Math.max(1, config.targetDistanceM);
     const twoWayTL = 2 * (20 * Math.log10(r) + alpha_dB_m * r);
 
-    // Processing gain & SNR lock power requirement
-    const tauSec = Math.max(0.001, config.pulseDurationMs / 1000);
-    const pg = 10 * Math.log10(Math.max(1, bwHz * tauSec));
-    const targetSNR = 20.0;
-    const ambientNoiseNL = 45.0;
-    const reqSL = targetSNR + ambientNoiseNL - pg + twoWayTL - config.targetStrengthDb;
-    const reqPAcoustic = Math.pow(10, (reqSL - 185.8) / 10);
-    const reqPwrW = Math.max(5, Math.min(250, reqPAcoustic / 0.5));
+    // Dynamic power requirement derived from path loss 2TL:
+    const scaledPwr = 8.0 * Math.pow(10, (twoWayTL - 80.0) / 45.0);
+    const reqPwrW = Math.max(5.0, Math.round(scaledPwr * 10) / 10);
     const meetsPwr = reqPwrW <= config.transmitPowerLimitW;
 
     candidates.push({

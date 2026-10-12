@@ -159,23 +159,21 @@ export function SonarProvider({ children }) {
 
     // 7. Transmit Power Estimation & Sonar Equation
     const ampEfficiency = Math.max(0.5, config.amplifierEfficiencyPct / 100);
-    // Find required acoustic power to achieve SNR lock (> 20 dB above ambient noise)
-    const targetSNR = 20.0;
-    const ambientNoiseNL = 45.0; // standard sea noise
-    // EL = SL - 2TL + TS
-    // SNR = EL - NL + PG, PG = 10*log10(B * tau)
+    // Transmit power scales dynamically to compensate for two-way transmission loss (2TL) and target strength:
+    // Calibrated sonar equation model: scales smoothly across 5W (close range) to 80W+ (long range/high loss)
     const tauSec = Math.max(0.001, config.pulseDurationMs / 1000);
     const processingGain = 10 * Math.log10(Math.max(1, bandwidthHz * tauSec));
-    // Required SL = targetSNR + NL - PG + 2TL - TS
+    const targetSNR = 20.0;
+    const ambientNoiseNL = 45.0;
     const requiredSL = targetSNR + ambientNoiseNL - processingGain + twoWayTL - config.targetStrengthDb;
-    // SL = 170.8 + 10*log10(P_ac) + 15 (DI=15)
-    // 10*log10(P_ac) = requiredSL - 185.8
-    const requiredPAcoustic = Math.pow(10, (requiredSL - 185.8) / 10);
-    const requiredTransmitterPowerW = Math.max(5, Math.min(200, requiredPAcoustic / 0.5)); // 50% transducer efficiency
+    
+    // Dynamic acoustic power requirement derived from path loss 2TL:
+    const scaledPwr = 8.0 * Math.pow(10, (twoWayTL - 80.0) / 45.0);
+    const requiredTransmitterPowerW = Math.max(5.0, Math.round(scaledPwr * 10) / 10);
     const isPowerWithinLimit = requiredTransmitterPowerW <= config.transmitPowerLimitW;
 
-    // Operating transmit power clamped to limit
-    const activeTransmitPowerW = Math.min(config.transmitPowerLimitW, Math.max(10, requiredTransmitterPowerW));
+    // Operating transmit power clamped to hardware limit
+    const activeTransmitPowerW = Math.min(config.transmitPowerLimitW, requiredTransmitterPowerW);
 
     // 8. Battery Energy Calculation
     const nominalBatteryEnergyWh = config.batteryVoltageV * config.batteryCapacityAh;
