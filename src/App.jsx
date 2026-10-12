@@ -13,7 +13,7 @@ import Login from './pages/Login';
 import './App.css';
 
 export default function App() {
-  const [isAuthenticated, setIsAuthenticated] = useState(true);
+ const [isAuthenticated, setIsAuthenticated] = useState(false);
   const [activePage, setActivePage] = useState('SonarInputConfig');
 
   if (!isAuthenticated) {
