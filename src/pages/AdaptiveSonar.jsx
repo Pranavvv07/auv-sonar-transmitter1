@@ -4,11 +4,14 @@ import { calculateAbsorption } from '../acousticModel';
 import { Waves, Zap, Activity, ArrowLeft, ArrowRight } from 'lucide-react';
 
 export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower }) {
-  const { config, results } = useSonar();
+  const { config, results, hasCalculated, isOutdated } = useSonar();
   const [activeChart, setActiveChart] = useState('attenuation'); // 'attenuation' | 'resolution' | 'margin'
 
   // Generate Frequency Sweep Points for Charts (from minFreqKhz to maxFreqKhz)
   const chartPoints = useMemo(() => {
+    if (!hasCalculated || results.maxF <= results.minF) {
+      return [];
+    }
     const pts = [];
     const minF = results.minF;
     const maxF = results.maxF;
@@ -46,15 +49,15 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
       });
     }
     return pts;
-  }, [results, config]);
+  }, [results, config, hasCalculated]);
 
   // Scaled max/min for SVG charts
-  const maxAlpha = Math.max(...chartPoints.map(p => p.alpha_dB_km), 10);
-  const minAlpha = Math.min(...chartPoints.map(p => p.alpha_dB_km), 0);
-  const maxRes = Math.max(...chartPoints.map(p => p.resCm), 10);
-  const minRes = Math.min(...chartPoints.map(p => p.resCm), 1);
-  const maxSnr = Math.max(...chartPoints.map(p => p.snr), 35);
-  const minSnr = Math.min(...chartPoints.map(p => p.snr), -5);
+  const maxAlpha = chartPoints.length > 0 ? Math.max(...chartPoints.map(p => p.alpha_dB_km), 10) : 10;
+  const minAlpha = chartPoints.length > 0 ? Math.min(...chartPoints.map(p => p.alpha_dB_km), 0) : 0;
+  const maxRes = chartPoints.length > 0 ? Math.max(...chartPoints.map(p => p.resCm), 10) : 10;
+  const minRes = chartPoints.length > 0 ? Math.min(...chartPoints.map(p => p.resCm), 1) : 1;
+  const maxSnr = chartPoints.length > 0 ? Math.max(...chartPoints.map(p => p.snr), 35) : 35;
+  const minSnr = chartPoints.length > 0 ? Math.min(...chartPoints.map(p => p.snr), -5) : -5;
 
   return (
     <div className="aquasense-main">
@@ -94,6 +97,20 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
           <ArrowRight size={14} />
         </button>
       </div>
+
+      {isOutdated && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', padding: '10px 14px', borderRadius: 8, fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{ fontSize: 14 }}>⚠️</span>
+          <span><strong>Inputs have changed:</strong> Output results reflect previous calculation. Return to Page 1 and click <strong>'Calculate Sonar Performance'</strong> to update.</span>
+        </div>
+      )}
+
+      {!hasCalculated && (
+        <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', color: '#0369a1', padding: '10px 14px', borderRadius: 8, fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{ fontSize: 14 }}>ℹ️</span>
+          <span><strong>Initial Zero State:</strong> Simulation has not been calculated yet. Output cards and plots initially show zero values. Return to Page 1 and click <strong>'Calculate Sonar Performance'</strong> to evaluate live data.</span>
+        </div>
+      )}
 
       {/* 1. ENVIRONMENT SUMMARY CARD */}
       <section className="aqua-card" style={{ marginBottom: 14 }}>
@@ -146,14 +163,14 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
               <Activity size={18} color="var(--primary-teal)" />
               <h2 className="aqua-card-title">2. Adaptive Frequency Analysis</h2>
             </div>
-            <span className="badge-tag-green">RECOMMENDED: {results.recommendedFreqKhz} kHz</span>
+            <span className="badge-tag-green">RECOMMENDED: {hasCalculated ? results.recommendedFreqKhz : 0} kHz</span>
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
             <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', borderRadius: 8, padding: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 10.5, fontWeight: 'bold', color: 'var(--primary-teal)' }}>RECOMMENDED CARRIER</span>
-                <strong style={{ fontSize: 16, color: 'var(--primary-teal)' }}>{results.recommendedFreqKhz} kHz</strong>
+                <strong style={{ fontSize: 16, color: 'var(--primary-teal)' }}>{hasCalculated ? results.recommendedFreqKhz : 0} kHz</strong>
               </div>
               <p style={{ fontSize: 10, color: 'var(--slate-text)', marginTop: 4, lineHeight: 1.45 }}>
                 <strong>Reason:</strong> At {config.targetDistanceM}m target distance and {config.turbidityNtu} NTU turbidity, {results.recommendedFreqKhz} kHz achieves the optimum compromise between molecular absorption loss ({results.effectiveAlpha_dB_km.toFixed(1)} dB/km) and acoustic image resolution.
@@ -170,12 +187,12 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
             <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, fontSize: 10.5 }}>
               <div className="mode-spec-box">
                 <span className="mode-spec-label">Round-Trip Attenuation</span>
-                <span className="mode-spec-val">{results.twoWayTL.toFixed(1)} dB</span>
+                <span className="mode-spec-val">{hasCalculated ? results.twoWayTL.toFixed(1) : '0.0'} dB</span>
                 <span className="mode-sub">Geometric Spreading + Absorption</span>
               </div>
               <div className="mode-spec-box">
                 <span className="mode-spec-label">Absorption Rate (α)</span>
-                <span className="mode-spec-val">{results.effectiveAlpha_dB_km.toFixed(2)} dB/km</span>
+                <span className="mode-spec-val">{hasCalculated ? results.effectiveAlpha_dB_km.toFixed(2) : '0.00'} dB/km</span>
                 <span className="mode-sub">Francois-Garrison Model</span>
               </div>
             </div>
@@ -189,8 +206,8 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
               <Zap size={18} color="var(--primary-teal)" />
               <h2 className="aqua-card-title">3. Range Resolution &amp; Transmit Power</h2>
             </div>
-            <span className={`badge-tag-${results.satisfiesResolution ? 'green' : 'blue'}`}>
-              {results.satisfiesResolution ? 'RESOLUTION SATISFIED' : 'BANDWIDTH LIMITED'}
+            <span className={`badge-tag-${hasCalculated ? (results.satisfiesResolution ? 'green' : 'blue') : 'blue'}`}>
+              {hasCalculated ? (results.satisfiesResolution ? 'RESOLUTION SATISFIED' : 'BANDWIDTH LIMITED') : 'NOT CALCULATED'}
             </span>
           </div>
 
@@ -201,12 +218,12 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
                 <span style={{ fontSize: 10.5, fontWeight: 'bold', color: results.satisfiesResolution ? '#166534' : '#92400e' }}>
                   ΔR = c / (2 · Bandwidth)
                 </span>
-                <strong style={{ fontSize: 15, color: results.satisfiesResolution ? '#15803d' : '#b45309' }}>
-                  {(results.achievableRangeResolutionM * 100).toFixed(1)} cm
+                <strong style={{ fontSize: 15, color: hasCalculated ? (results.satisfiesResolution ? '#15803d' : '#b45309') : 'var(--slate-muted)' }}>
+                  {hasCalculated ? (results.achievableRangeResolutionM * 100).toFixed(1) : '0.0'} cm
                 </strong>
               </div>
               <div style={{ fontSize: 9.5, color: results.satisfiesResolution ? '#14532d' : '#78350f', marginTop: 4 }}>
-                Required Bandwidth: <strong>{results.requiredBandwidthKhz.toFixed(1)} kHz</strong> • Configured Bandwidth: <strong>{results.effectiveBandwidthKhz} kHz</strong>
+                Required Bandwidth: <strong>{hasCalculated ? results.requiredBandwidthKhz.toFixed(1) : '0.0'} kHz</strong> • Configured Bandwidth: <strong>{hasCalculated ? results.effectiveBandwidthKhz : 0} kHz</strong>
               </div>
               {!results.satisfiesResolution && (
                 <div style={{ fontSize: 9, color: '#b45309', marginTop: 4 }}>
@@ -219,12 +236,12 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
             <div style={{ background: results.isPowerWithinLimit ? '#f8fafc' : '#fef2f2', border: `1px solid ${results.isPowerWithinLimit ? '#e2e8f0' : '#fecaca'}`, borderRadius: 8, padding: 10 }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                 <span style={{ fontSize: 10.5, fontWeight: 'bold', color: 'var(--navy-dark)' }}>Estimated Transmit Power</span>
-                <strong style={{ fontSize: 15, color: results.isPowerWithinLimit ? 'var(--primary-teal)' : '#dc2626' }}>
-                  {results.requiredTransmitterPowerW.toFixed(1)} W
+                <strong style={{ fontSize: 15, color: hasCalculated ? (results.isPowerWithinLimit ? 'var(--primary-teal)' : '#dc2626') : 'var(--slate-muted)' }}>
+                  {hasCalculated ? results.requiredTransmitterPowerW.toFixed(1) : '0.0'} W
                 </strong>
               </div>
               <div style={{ fontSize: 9.5, color: 'var(--slate-muted)', marginTop: 4 }}>
-                Configured Power Limit: <strong>{config.transmitPowerLimitW} W</strong> • Active Power: <strong>{results.activeTransmitPowerW} W</strong>
+                Configured Power Limit: <strong>{config.transmitPowerLimitW} W</strong> • Active Power: <strong>{hasCalculated ? results.activeTransmitPowerW : 0} W</strong>
               </div>
               {!results.isPowerWithinLimit && (
                 <div style={{ fontSize: 9, color: '#dc2626', marginTop: 4 }}>
@@ -242,7 +259,7 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
               </div>
               <div className="mode-spec-box">
                 <span className="mode-spec-label">Matched Filter Gain</span>
-                <span className="mode-spec-val">+{results.processingGain.toFixed(1)} dB</span>
+                <span className="mode-spec-val">+{hasCalculated ? results.processingGain.toFixed(1) : '0.0'} dB</span>
                 <span className="mode-sub">10·log₁₀(B·τ)</span>
               </div>
             </div>
@@ -276,7 +293,14 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
               </tr>
             </thead>
             <tbody>
-              {(results.candidateFrequencies || []).map((cand) => {
+              {(!hasCalculated || !results.candidateFrequencies || results.candidateFrequencies.length === 0) ? (
+                <tr>
+                  <td colSpan="8" style={{ textAlign: 'center', padding: '18px', color: '#64748b', fontSize: 11 }}>
+                    No candidate frequencies evaluated yet. Run calculation on Page 1 to populate candidate spectrum analysis.
+                  </td>
+                </tr>
+              ) : (
+                results.candidateFrequencies.map((cand) => {
                 const isSelected = Math.abs(cand.freqKhz - results.recommendedFreqKhz) < ((results.maxF - results.minF) / 8);
                 return (
                   <tr 
@@ -307,7 +331,7 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
                     </td>
                   </tr>
                 );
-              })}
+              }))}
             </tbody>
           </table>
         </div>
@@ -357,6 +381,17 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
             <line x1="50" y1="110" x2="480" y2="110" stroke="#f1f5f9" />
             <line x1="50" y1="160" x2="480" y2="160" stroke="#cbd5e1" strokeWidth="1.2" />
 
+            {(!hasCalculated || chartPoints.length === 0) ? (
+              <g>
+                <text x="265" y="85" fill="#64748b" fontSize="12" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
+                  EMPTY GRAPH — ZERO STATE
+                </text>
+                <text x="265" y="110" fill="#94a3b8" fontSize="10" textAnchor="middle">
+                  Configure parameters and click 'Calculate Sonar Performance' on Page 1 to generate acoustic plots
+                </text>
+              </g>
+            ) : (
+              <>
             {/* CHART A: Frequency vs Attenuation (dB/km) */}
             {activeChart === 'attenuation' && (
               <g>
@@ -470,6 +505,8 @@ export default function AdaptiveSonar({ onNavigateToInputs, onNavigateToPower })
                 </text>
               );
             })}
+              </>
+            )}
           </svg>
         </div>
       </section>

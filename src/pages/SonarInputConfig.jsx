@@ -12,7 +12,7 @@ import {
 } from 'lucide-react';
 
 export default function SonarInputConfig({ onNavigateToAnalysis }) {
-  const { config, updateConfig, resetToDefaults, triggerCalculate, isCalculating, results } = useSonar();
+  const { config, updateConfig, resetToDefaults, triggerCalculate, isCalculating, results, hasCalculated, isOutdated } = useSonar();
   const [errors, setErrors] = useState({});
   const [notification, setNotification] = useState(null);
   const [activeChart, setActiveChart] = useState('attenuation'); // 'attenuation' | 'resolution' | 'margin'
@@ -24,14 +24,23 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
 
   const validateInputs = () => {
     const errs = {};
+    if (config.targetDistanceM <= 0) errs.targetDistanceM = 'Must be > 0 m';
+    if (config.batteryCapacityAh <= 0) errs.batteryCapacityAh = 'Must be > 0 Ah';
+    if (config.batteryVoltageV <= 0) errs.batteryVoltageV = 'Must be > 0 V';
+    if (config.minFreqKhz <= 0) errs.minFreqKhz = 'Must be > 0 kHz';
+    if (config.maxFreqKhz <= 0) errs.maxFreqKhz = 'Must be > 0 kHz';
+    else if (config.maxFreqKhz <= config.minFreqKhz) errs.maxFreqKhz = 'Must be > Min Freq';
+    if (config.desiredRangeResM <= 0) errs.desiredRangeResM = 'Must be > 0 m';
+    if (config.desiredMissionHours <= 0) errs.desiredMissionHours = 'Must be > 0 h';
+    if (config.chirpBandwidthKhz <= 0) errs.chirpBandwidthKhz = 'Must be > 0 kHz';
+    if (config.pulseDurationMs <= 0) errs.pulseDurationMs = 'Must be > 0 ms';
+    if (config.transmitPowerLimitW <= 0) errs.transmitPowerLimitW = 'Must be > 0 W';
+    if (config.usableCapacityPct <= 0 || config.usableCapacityPct > 100) errs.usableCapacityPct = '1 to 100%';
+    if (config.amplifierEfficiencyPct <= 0 || config.amplifierEfficiencyPct > 100) errs.amplifierEfficiencyPct = '1 to 100%';
     if (config.depthM < 0 || config.depthM > 1000) errs.depthM = '0 to 1000m';
     if (config.turbidityNtu < 0 || config.turbidityNtu > 100) errs.turbidityNtu = '0 to 100 NTU';
-    if (config.tempC < 0 || config.tempC > 35) errs.tempC = '0 to 35°C';
-    if (config.salinityPsu < 0 || config.salinityPsu > 45) errs.salinityPsu = '0 to 45 PSU';
-    if (config.minFreqKhz < 10 || config.minFreqKhz >= config.maxFreqKhz) errs.minFreqKhz = 'Must be < Max';
-    if (config.maxFreqKhz > 800 || config.maxFreqKhz <= config.minFreqKhz) errs.maxFreqKhz = 'Must be > Min';
-    if (config.targetDistanceM < 1 || config.targetDistanceM > 1000) errs.targetDistanceM = '1 to 1000m';
-    if (config.desiredRangeResM <= 0 || config.desiredRangeResM > 5) errs.desiredRangeResM = '>0 and <=5m';
+    if (config.tempC < 0 || config.tempC > 40) errs.tempC = '0 to 40°C';
+    if (config.salinityPsu < 0 || config.salinityPsu > 50) errs.salinityPsu = '0 to 50 PSU';
     setErrors(errs);
     return Object.keys(errs).length === 0;
   };
@@ -41,7 +50,7 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
       triggerCalculate();
       showNotification('Sonar performance successfully calculated! Outputs and graphs updated.');
     } else {
-      showNotification('Please correct highlighted input errors.');
+      showNotification('Validation Error: Target distance, battery, frequencies and voltages must be > 0 to calculate.');
     }
   };
 
@@ -53,6 +62,9 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
 
   // Generate Frequency Sweep Data Points for the Graph
   const chartPoints = useMemo(() => {
+    if (!hasCalculated || results.maxF <= results.minF) {
+      return [];
+    }
     const pts = [];
     const minF = results.minF;
     const maxF = results.maxF;
@@ -78,14 +90,14 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
       });
     }
     return pts;
-  }, [results, config]);
+  }, [results, config, hasCalculated]);
 
-  const maxAlpha = Math.max(...chartPoints.map(p => p.alpha_dB_km), 10);
-  const minAlpha = Math.min(...chartPoints.map(p => p.alpha_dB_km), 0);
-  const maxRes = Math.max(...chartPoints.map(p => p.resCm), 10);
-  const minRes = Math.min(...chartPoints.map(p => p.resCm), 1);
-  const maxSnr = Math.max(...chartPoints.map(p => p.snr), 35);
-  const minSnr = Math.min(...chartPoints.map(p => p.snr), -5);
+  const maxAlpha = chartPoints.length > 0 ? Math.max(...chartPoints.map(p => p.alpha_dB_km), 10) : 10;
+  const minAlpha = chartPoints.length > 0 ? Math.min(...chartPoints.map(p => p.alpha_dB_km), 0) : 0;
+  const maxRes = chartPoints.length > 0 ? Math.max(...chartPoints.map(p => p.resCm), 10) : 10;
+  const minRes = chartPoints.length > 0 ? Math.min(...chartPoints.map(p => p.resCm), 1) : 1;
+  const maxSnr = chartPoints.length > 0 ? Math.max(...chartPoints.map(p => p.snr), 35) : 35;
+  const minSnr = chartPoints.length > 0 ? Math.min(...chartPoints.map(p => p.snr), -5) : -5;
 
   return (
     <div className="aquasense-main">
@@ -113,6 +125,20 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
         </div>
       )}
 
+      {isOutdated && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', padding: '10px 14px', borderRadius: 8, fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{ fontSize: 14 }}>⚠️</span>
+          <span><strong>Inputs have changed:</strong> Output results reflect previous calculation. Click <strong>'Calculate Sonar Performance'</strong> to recalculate results.</span>
+        </div>
+      )}
+
+      {!hasCalculated && (
+        <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', color: '#0369a1', padding: '10px 14px', borderRadius: 8, fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{ fontSize: 14 }}>ℹ️</span>
+          <span><strong>Initial State (All 0):</strong> Numerical inputs and outputs are initially 0. Enter your parameters and click <strong>'Calculate Sonar Performance'</strong> to compute acoustic and power metrics.</span>
+        </div>
+      )}
+
       {/* 3-COLUMN INPUTS GRID MATCHING THE REFERENCE IMAGE */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: 12, marginBottom: 14 }}>
         {/* COLUMN 1: Environmental Inputs */}
@@ -122,44 +148,56 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Water Depth (m)</label>
-              <input
-                type="number"
-                value={config.depthM}
-                onChange={(e) => updateConfig('depthM', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.depthM ? '#dc2626' : 'var(--slate-text)' }}>Water Depth (m)</label>
+                <input
+                  type="number"
+                  value={config.depthM}
+                  onChange={(e) => updateConfig('depthM', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.depthM ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.depthM && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.depthM}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Water Turbidity (NTU)</label>
-              <input
-                type="number"
-                value={config.turbidityNtu}
-                onChange={(e) => updateConfig('turbidityNtu', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.turbidityNtu ? '#dc2626' : 'var(--slate-text)' }}>Water Turbidity (NTU)</label>
+                <input
+                  type="number"
+                  value={config.turbidityNtu}
+                  onChange={(e) => updateConfig('turbidityNtu', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.turbidityNtu ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.turbidityNtu && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.turbidityNtu}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Water Temperature (°C)</label>
-              <input
-                type="number"
-                value={config.tempC}
-                onChange={(e) => updateConfig('tempC', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.tempC ? '#dc2626' : 'var(--slate-text)' }}>Water Temperature (°C)</label>
+                <input
+                  type="number"
+                  value={config.tempC}
+                  onChange={(e) => updateConfig('tempC', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.tempC ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.tempC && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.tempC}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Water Salinity (PSU)</label>
-              <input
-                type="number"
-                value={config.salinityPsu}
-                onChange={(e) => updateConfig('salinityPsu', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.salinityPsu ? '#dc2626' : 'var(--slate-text)' }}>Water Salinity (PSU)</label>
+                <input
+                  type="number"
+                  value={config.salinityPsu}
+                  onChange={(e) => updateConfig('salinityPsu', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.salinityPsu ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.salinityPsu && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.salinityPsu}</div>}
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', background: '#f8fafc', padding: '6px 8px', borderRadius: 6, border: '1px solid #e2e8f0' }}>
@@ -189,65 +227,83 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Min Frequency (kHz)</label>
-              <input
-                type="number"
-                value={config.minFreqKhz}
-                onChange={(e) => updateConfig('minFreqKhz', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.minFreqKhz ? '#dc2626' : 'var(--slate-text)' }}>Min Frequency (kHz)</label>
+                <input
+                  type="number"
+                  value={config.minFreqKhz}
+                  onChange={(e) => updateConfig('minFreqKhz', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.minFreqKhz ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.minFreqKhz && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.minFreqKhz}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Max Frequency (kHz)</label>
-              <input
-                type="number"
-                value={config.maxFreqKhz}
-                onChange={(e) => updateConfig('maxFreqKhz', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.maxFreqKhz ? '#dc2626' : 'var(--slate-text)' }}>Max Frequency (kHz)</label>
+                <input
+                  type="number"
+                  value={config.maxFreqKhz}
+                  onChange={(e) => updateConfig('maxFreqKhz', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.maxFreqKhz ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.maxFreqKhz && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.maxFreqKhz}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Target Distance (m)</label>
-              <input
-                type="number"
-                value={config.targetDistanceM}
-                onChange={(e) => updateConfig('targetDistanceM', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.targetDistanceM ? '#dc2626' : 'var(--slate-text)' }}>Target Distance (m)</label>
+                <input
+                  type="number"
+                  value={config.targetDistanceM}
+                  onChange={(e) => updateConfig('targetDistanceM', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.targetDistanceM ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.targetDistanceM && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.targetDistanceM}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Range Resolution (m)</label>
-              <input
-                type="number"
-                step="0.01"
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.desiredRangeResM ? '#dc2626' : 'var(--slate-text)' }}>Range Resolution (m)</label>
+                <input
+                  type="number"
+                  step="0.01"
                 value={config.desiredRangeResM}
-                onChange={(e) => updateConfig('desiredRangeResM', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+                  onChange={(e) => updateConfig('desiredRangeResM', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.desiredRangeResM ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.desiredRangeResM && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.desiredRangeResM}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Chirp Bandwidth (kHz)</label>
-              <input
-                type="number"
-                value={config.chirpBandwidthKhz}
-                onChange={(e) => updateConfig('chirpBandwidthKhz', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.chirpBandwidthKhz ? '#dc2626' : 'var(--slate-text)' }}>Chirp Bandwidth (kHz)</label>
+                <input
+                  type="number"
+                  value={config.chirpBandwidthKhz}
+                  onChange={(e) => updateConfig('chirpBandwidthKhz', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.chirpBandwidthKhz ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.chirpBandwidthKhz && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.chirpBandwidthKhz}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Pulse Duration (ms)</label>
-              <input
-                type="number"
-                value={config.pulseDurationMs}
-                onChange={(e) => updateConfig('pulseDurationMs', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.pulseDurationMs ? '#dc2626' : 'var(--slate-text)' }}>Pulse Duration (ms)</label>
+                <input
+                  type="number"
+                  value={config.pulseDurationMs}
+                  onChange={(e) => updateConfig('pulseDurationMs', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.pulseDurationMs ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.pulseDurationMs && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.pulseDurationMs}</div>}
             </div>
 
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
@@ -262,34 +318,43 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
               </select>
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Transmit Power Limit (W)</label>
-              <input
-                type="number"
-                value={config.transmitPowerLimitW}
-                onChange={(e) => updateConfig('transmitPowerLimitW', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.transmitPowerLimitW ? '#dc2626' : 'var(--slate-text)' }}>Transmit Power Limit (W)</label>
+                <input
+                  type="number"
+                  value={config.transmitPowerLimitW}
+                  onChange={(e) => updateConfig('transmitPowerLimitW', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.transmitPowerLimitW ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.transmitPowerLimitW && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.transmitPowerLimitW}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Target Strength (dB)</label>
-              <input
-                type="number"
-                value={config.targetStrengthDb}
-                onChange={(e) => updateConfig('targetStrengthDb', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.targetStrengthDb ? '#dc2626' : 'var(--slate-text)' }}>Target Strength (dB)</label>
+                <input
+                  type="number"
+                  value={config.targetStrengthDb}
+                  onChange={(e) => updateConfig('targetStrengthDb', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.targetStrengthDb ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.targetStrengthDb && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.targetStrengthDb}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Receiver Sensitivity (dB)</label>
-              <input
-                type="number"
-                value={config.receiverSensitivityDb}
-                onChange={(e) => updateConfig('receiverSensitivityDb', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.receiverSensitivityDb ? '#dc2626' : 'var(--slate-text)' }}>Receiver Sensitivity (dB)</label>
+                <input
+                  type="number"
+                  value={config.receiverSensitivityDb}
+                  onChange={(e) => updateConfig('receiverSensitivityDb', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.receiverSensitivityDb ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.receiverSensitivityDb && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.receiverSensitivityDb}</div>}
             </div>
           </div>
         </div>
@@ -301,74 +366,95 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
           </div>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Battery Voltage (V)</label>
-              <input
-                type="number"
-                value={config.batteryVoltageV}
-                onChange={(e) => updateConfig('batteryVoltageV', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.batteryVoltageV ? '#dc2626' : 'var(--slate-text)' }}>Battery Voltage (V)</label>
+                <input
+                  type="number"
+                  value={config.batteryVoltageV}
+                  onChange={(e) => updateConfig('batteryVoltageV', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.batteryVoltageV ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.batteryVoltageV && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.batteryVoltageV}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Battery Capacity (Ah)</label>
-              <input
-                type="number"
-                value={config.batteryCapacityAh}
-                onChange={(e) => updateConfig('batteryCapacityAh', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.batteryCapacityAh ? '#dc2626' : 'var(--slate-text)' }}>Battery Capacity (Ah)</label>
+                <input
+                  type="number"
+                  value={config.batteryCapacityAh}
+                  onChange={(e) => updateConfig('batteryCapacityAh', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.batteryCapacityAh ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.batteryCapacityAh && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.batteryCapacityAh}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Usable Capacity (%)</label>
-              <input
-                type="number"
-                value={config.usableCapacityPct}
-                onChange={(e) => updateConfig('usableCapacityPct', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.usableCapacityPct ? '#dc2626' : 'var(--slate-text)' }}>Usable Capacity (%)</label>
+                <input
+                  type="number"
+                  value={config.usableCapacityPct}
+                  onChange={(e) => updateConfig('usableCapacityPct', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.usableCapacityPct ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.usableCapacityPct && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.usableCapacityPct}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Mission Duration (h)</label>
-              <input
-                type="number"
-                value={config.desiredMissionHours}
-                onChange={(e) => updateConfig('desiredMissionHours', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.desiredMissionHours ? '#dc2626' : 'var(--slate-text)' }}>Mission Duration (h)</label>
+                <input
+                  type="number"
+                  value={config.desiredMissionHours}
+                  onChange={(e) => updateConfig('desiredMissionHours', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.desiredMissionHours ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.desiredMissionHours && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.desiredMissionHours}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Amplifier Efficiency (%)</label>
-              <input
-                type="number"
-                value={config.amplifierEfficiencyPct}
-                onChange={(e) => updateConfig('amplifierEfficiencyPct', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.amplifierEfficiencyPct ? '#dc2626' : 'var(--slate-text)' }}>Amplifier Efficiency (%)</label>
+                <input
+                  type="number"
+                  value={config.amplifierEfficiencyPct}
+                  onChange={(e) => updateConfig('amplifierEfficiencyPct', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.amplifierEfficiencyPct ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.amplifierEfficiencyPct && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.amplifierEfficiencyPct}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Electronics &amp; Sensor Power (W)</label>
-              <input
-                type="number"
-                value={config.electronicsPowerW}
-                onChange={(e) => updateConfig('electronicsPowerW', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.electronicsPowerW ? '#dc2626' : 'var(--slate-text)' }}>Electronics &amp; Sensor Power (W)</label>
+                <input
+                  type="number"
+                  value={config.electronicsPowerW}
+                  onChange={(e) => updateConfig('electronicsPowerW', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.electronicsPowerW ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.electronicsPowerW && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.electronicsPowerW}</div>}
             </div>
 
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
-              <label style={{ fontSize: 10.5, color: 'var(--slate-text)' }}>Duty Cycle (%)</label>
-              <input
-                type="number"
-                value={config.dutyCyclePct}
-                onChange={(e) => updateConfig('dutyCyclePct', Number(e.target.value))}
-                style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: '1px solid var(--border-color)', fontSize: 11, textAlign: 'right' }}
-              />
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                <label style={{ fontSize: 10.5, color: errors.dutyCyclePct ? '#dc2626' : 'var(--slate-text)' }}>Duty Cycle (%)</label>
+                <input
+                  type="number"
+                  value={config.dutyCyclePct}
+                  onChange={(e) => updateConfig('dutyCyclePct', Number(e.target.value))}
+                  style={{ width: 90, padding: '5px 8px', borderRadius: 6, border: `1px solid ${errors.dutyCyclePct ? '#ef4444' : 'var(--border-color)'}`, fontSize: 11, textAlign: 'right' }}
+                />
+              </div>
+              {errors.dutyCyclePct && <div style={{ fontSize: 9, color: '#dc2626', textAlign: 'right', marginTop: 2 }}>{errors.dutyCyclePct}</div>}
             </div>
           </div>
         </div>
@@ -456,7 +542,7 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
             <Activity size={14} color="var(--mint-green-dark)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{(results.achievableRangeResolutionM * 100).toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? (results.achievableRangeResolutionM * 100).toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">cm</span>
           </div>
           <div className="metric-card-footnote">
@@ -470,11 +556,11 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
             <Activity size={14} color="var(--accent-cyan)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.effectiveAlpha_dB_km.toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? results.effectiveAlpha_dB_km.toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">dB/km</span>
           </div>
           <div className="metric-card-footnote">
-            <span>2TL: {results.twoWayTL.toFixed(1)} dB</span>
+            <span>2TL: {hasCalculated ? results.twoWayTL.toFixed(1) : '0.0'} dB</span>
           </div>
         </div>
 
@@ -484,7 +570,7 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
             <Zap size={14} color="var(--primary-teal)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.activeTransmitPowerW}</span>
+            <span className="metric-card-number">{hasCalculated ? results.activeTransmitPowerW : 0}</span>
             <span className="metric-card-unit">W</span>
           </div>
           <div className="metric-card-footnote text-savings">
@@ -498,11 +584,11 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
             <Zap size={14} color="var(--accent-cyan)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.totalAverageSystemPowerW.toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? results.totalAverageSystemPowerW.toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">W</span>
           </div>
           <div className="metric-card-footnote text-savings">
-            <span>-{results.powerSavingPct.toFixed(1)}% vs 80W Base</span>
+            <span>{hasCalculated ? `-${results.powerSavingPct.toFixed(1)}% vs 80W Base` : '0% vs 80W Base'}</span>
           </div>
         </div>
 
@@ -512,7 +598,7 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
             <Clock size={14} color="var(--mint-green-dark)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.estimatedRuntimeHours.toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? results.estimatedRuntimeHours.toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">hrs</span>
           </div>
           <div className="metric-card-footnote text-savings">
@@ -564,6 +650,17 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
             <line x1="50" y1="110" x2="480" y2="110" stroke="#f1f5f9" />
             <line x1="50" y1="155" x2="480" y2="155" stroke="#cbd5e1" strokeWidth="1.2" />
 
+            {(!hasCalculated || chartPoints.length === 0) ? (
+              <g>
+                <text x="265" y="80" fill="#64748b" fontSize="12" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
+                  EMPTY GRAPH — ZERO STATE
+                </text>
+                <text x="265" y="105" fill="#94a3b8" fontSize="10" textAnchor="middle">
+                  Enter parameters and click 'Calculate Sonar Performance' to plot dynamic curves
+                </text>
+              </g>
+            ) : (
+              <>
             {/* CHART 1: Frequency vs Attenuation */}
             {activeChart === 'attenuation' && (
               <g>
@@ -672,6 +769,8 @@ export default function SonarInputConfig({ onNavigateToAnalysis }) {
                 </text>
               );
             })}
+              </>
+            )}
           </svg>
         </div>
 

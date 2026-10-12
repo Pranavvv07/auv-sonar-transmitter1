@@ -3,20 +3,22 @@ import { useSonar } from '../SonarContext';
 import { Battery, Zap, AlertTriangle, ArrowLeft, ArrowRight } from 'lucide-react';
 
 export default function PowerAnalysis({ onNavigateToAnalysis, onNavigateToDashboard }) {
-  const { config, results } = useSonar();
+  const { config, results, hasCalculated, isOutdated } = useSonar();
   const [activeChart, setActiveChart] = useState('power'); // 'power' | 'runtime' | 'discharge' | 'mission_energy'
 
   // Generate Mission Discharge Curve (Hours 0 to desiredMissionHours)
   const dischargePoints = [];
-  const hoursStep = Math.max(0.5, config.desiredMissionHours / 8);
-  for (let h = 0; h <= config.desiredMissionHours; h += hoursStep) {
-    const adaptiveRemaining = Math.max(0, results.usableBatteryEnergyWh - (results.totalAverageSystemPowerW * h));
-    const baselineRemaining = Math.max(0, results.usableBatteryEnergyWh - (results.baselineAvgPowerW * h));
-    dischargePoints.push({
-      hour: h,
-      adaptiveWh: adaptiveRemaining,
-      baselineWh: baselineRemaining
-    });
+  if (hasCalculated && config.desiredMissionHours > 0 && results.usableBatteryEnergyWh > 0) {
+    const hoursStep = Math.max(0.5, config.desiredMissionHours / 8);
+    for (let h = 0; h <= config.desiredMissionHours; h += hoursStep) {
+      const adaptiveRemaining = Math.max(0, results.usableBatteryEnergyWh - (results.totalAverageSystemPowerW * h));
+      const baselineRemaining = Math.max(0, results.usableBatteryEnergyWh - (results.baselineAvgPowerW * h));
+      dischargePoints.push({
+        hour: h,
+        adaptiveWh: adaptiveRemaining,
+        baselineWh: baselineRemaining
+      });
+    }
   }
 
   return (
@@ -58,8 +60,22 @@ export default function PowerAnalysis({ onNavigateToAnalysis, onNavigateToDashbo
         </button>
       </div>
 
+      {isOutdated && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', padding: '10px 14px', borderRadius: 8, fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{ fontSize: 14 }}>⚠️</span>
+          <span><strong>Inputs have changed:</strong> Output results reflect previous calculation. Return to Page 1 and click <strong>'Calculate Sonar Performance'</strong> to update.</span>
+        </div>
+      )}
+
+      {!hasCalculated && (
+        <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', color: '#0369a1', padding: '10px 14px', borderRadius: 8, fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{ fontSize: 14 }}>ℹ️</span>
+          <span><strong>Initial Zero State:</strong> Power analysis has not been calculated yet. Output cards and discharge curves initially show zero values. Return to Page 1 and click <strong>'Calculate Sonar Performance'</strong>.</span>
+        </div>
+      )}
+
       {/* WARNINGS BANNER */}
-      {(!results.meetsMissionDuration || !results.isPowerWithinLimit) && (
+      {hasCalculated && (!results.meetsMissionDuration || !results.isPowerWithinLimit) && (
         <div style={{ background: '#fffbeb', border: '1px solid #fde68a', borderRadius: 8, padding: 12, marginBottom: 14 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, color: '#92400e', marginBottom: 4 }}>
             <AlertTriangle size={18} />
@@ -279,14 +295,14 @@ export default function PowerAnalysis({ onNavigateToAnalysis, onNavigateToDashbo
 
           {/* Mission Feasibility */}
           <div style={{ background: results.meetsMissionDuration ? '#f0fdf4' : '#fef2f2', padding: 12, borderRadius: 8, border: `1px solid ${results.meetsMissionDuration ? '#bbf7d0' : '#fecaca'}` }}>
-            <span style={{ fontSize: 10, fontFamily: 'monospace', color: results.meetsMissionDuration ? '#166534' : '#991b1b' }}>MISSION FEASIBILITY</span>
-            <strong style={{ fontSize: 14, color: results.meetsMissionDuration ? '#15803d' : '#dc2626', display: 'block', marginTop: 4 }}>
-              {results.meetsMissionDuration ? 'FEASIBLE' : 'DEFICIT'}
+            <span style={{ fontSize: 10, fontFamily: 'monospace', color: hasCalculated ? (results.meetsMissionDuration ? '#166534' : '#991b1b') : 'var(--slate-muted)' }}>MISSION FEASIBILITY</span>
+            <strong style={{ fontSize: 14, color: hasCalculated ? (results.meetsMissionDuration ? '#15803d' : '#dc2626') : 'var(--navy-dark)', display: 'block', marginTop: 4 }}>
+              {hasCalculated ? (results.meetsMissionDuration ? 'FEASIBLE' : 'DEFICIT') : 'NOT CALCULATED'}
             </strong>
             <div style={{ fontSize: 9.5, color: results.meetsMissionDuration ? '#14532d' : '#7f1d1d', marginTop: 6 }}>
-              {results.meetsMissionDuration 
+              {hasCalculated ? (results.meetsMissionDuration 
                 ? `Satisfies target ${config.desiredMissionHours}h with ${(results.estimatedRuntimeHours - config.desiredMissionHours).toFixed(1)}h reserve`
-                : `Short by ${(config.desiredMissionHours - results.estimatedRuntimeHours).toFixed(1)}h`}
+                : `Short by ${(config.desiredMissionHours - results.estimatedRuntimeHours).toFixed(1)}h`) : 'Simulation not calculated yet'}
             </div>
           </div>
         </div>
@@ -335,6 +351,17 @@ export default function PowerAnalysis({ onNavigateToAnalysis, onNavigateToDashbo
             <line x1="50" y1="110" x2="480" y2="110" stroke="#f1f5f9" />
             <line x1="50" y1="155" x2="480" y2="155" stroke="#cbd5e1" strokeWidth="1.2" />
 
+            {(!hasCalculated || results.usableBatteryEnergyWh <= 0) ? (
+              <g>
+                <text x="265" y="85" fill="#64748b" fontSize="12" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
+                  EMPTY GRAPH — ZERO STATE
+                </text>
+                <text x="265" y="110" fill="#94a3b8" fontSize="10" textAnchor="middle">
+                  Configure battery parameters and click 'Calculate Sonar Performance' on Page 1 to generate power profiles
+                </text>
+              </g>
+            ) : (
+              <>
             {/* CHART 1: Fixed vs Adaptive Power Bar Chart */}
             {activeChart === 'power' && (
               <g>
@@ -476,6 +503,8 @@ export default function PowerAnalysis({ onNavigateToAnalysis, onNavigateToDashbo
                   );
                 })()}
               </g>
+            )}
+              </>
             )}
           </svg>
         </div>

@@ -20,7 +20,7 @@ import {
 } from 'lucide-react';
 
 export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, onNavigateToPower }) {
-  const { config, results } = useSonar();
+  const { config, results, hasCalculated, isOutdated } = useSonar();
   const [activeChart, setActiveChart] = useState('power'); // 'power' | 'battery_discharge' | 'attenuation' | 'resolution' | 'runtime'
   const [notification, setNotification] = useState(null);
 
@@ -31,6 +31,7 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
 
   // Generate Data for Frequency vs Attenuation
   const freqPoints = useMemo(() => {
+    if (!hasCalculated || results.maxF <= results.minF) return [];
     const pts = [];
     const minF = results.minF;
     const maxF = results.maxF;
@@ -43,17 +44,19 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
       });
     }
     return pts;
-  }, [results, config]);
+  }, [results, config, hasCalculated]);
 
   // Battery Energy Discharge Points
   const dischargePoints = [];
-  const hoursStep = Math.max(0.5, config.desiredMissionHours / 6);
-  for (let h = 0; h <= config.desiredMissionHours; h += hoursStep) {
-    const remainingWh = Math.max(0, results.usableBatteryEnergyWh - (results.totalAverageSystemPowerW * h));
-    dischargePoints.push({
-      hour: h,
-      remainingWh
-    });
+  if (hasCalculated && config.desiredMissionHours > 0 && results.usableBatteryEnergyWh > 0) {
+    const hoursStep = Math.max(0.5, config.desiredMissionHours / 6);
+    for (let h = 0; h <= config.desiredMissionHours; h += hoursStep) {
+      const remainingWh = Math.max(0, results.usableBatteryEnergyWh - (results.totalAverageSystemPowerW * h));
+      dischargePoints.push({
+        hour: h,
+        remainingWh
+      });
+    }
   }
 
   // Export Complete Performance Report to CSV
@@ -165,19 +168,37 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
         </button>
       </div>
 
+      {isOutdated && (
+        <div style={{ background: '#fffbeb', border: '1px solid #fde68a', color: '#92400e', padding: '10px 14px', borderRadius: 8, fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{ fontSize: 14 }}>⚠️</span>
+          <span><strong>Inputs have changed:</strong> Output results reflect previous calculation. Return to Page 1 and click <strong>'Calculate Sonar Performance'</strong> to update.</span>
+        </div>
+      )}
+
+      {!hasCalculated && (
+        <div style={{ background: '#f0f9ff', border: '1px solid #bae6fd', color: '#0369a1', padding: '10px 14px', borderRadius: 8, fontSize: 11.5, display: 'flex', alignItems: 'center', gap: 8, marginBottom: 14 }}>
+          <span style={{ fontSize: 14 }}>ℹ️</span>
+          <span><strong>Initial Zero State:</strong> Performance dashboard has not been calculated yet. All metrics and graphs initially display zero. Return to Page 1 and click <strong>'Calculate Sonar Performance'</strong>.</span>
+        </div>
+      )}
+
       {/* 4. MISSION FEASIBILITY STATUS BANNER */}
-      <section className="aqua-card" style={{ marginBottom: 14, borderLeft: `4px solid ${results.meetsMissionDuration && results.isPowerWithinLimit ? 'var(--mint-green)' : '#f59e0b'}` }}>
+      <section className="aqua-card" style={{ marginBottom: 14, borderLeft: `4px solid ${hasCalculated ? (results.meetsMissionDuration && results.isPowerWithinLimit ? 'var(--mint-green)' : '#f59e0b') : '#cbd5e1'}` }}>
         <div className="aqua-card-header" style={{ marginBottom: 4 }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-            {results.meetsMissionDuration && results.isPowerWithinLimit ? (
-              <CheckCircle2 size={18} color="var(--mint-green-dark)" />
+            {hasCalculated ? (
+              results.meetsMissionDuration && results.isPowerWithinLimit ? (
+                <CheckCircle2 size={18} color="var(--mint-green-dark)" />
+              ) : (
+                <AlertTriangle size={18} color="#d97706" />
+              )
             ) : (
-              <AlertTriangle size={18} color="#d97706" />
+              <Activity size={18} color="var(--slate-muted)" />
             )}
             <h2 className="aqua-card-title">Mission Feasibility Status: {results.feasibilityStatus}</h2>
           </div>
-          <span className={`badge-tag-${results.meetsMissionDuration && results.isPowerWithinLimit ? 'green' : 'blue'}`}>
-            {results.meetsMissionDuration ? 'RUNTIME MET' : 'ATTENTION REQUIRED'}
+          <span className={`badge-tag-${hasCalculated ? (results.meetsMissionDuration && results.isPowerWithinLimit ? 'green' : 'blue') : 'blue'}`}>
+            {hasCalculated ? (results.meetsMissionDuration ? 'RUNTIME MET' : 'ATTENTION REQUIRED') : 'SIMULATION PENDING'}
           </span>
         </div>
         <p style={{ fontSize: 11, color: 'var(--slate-text)', lineHeight: 1.5 }}>
@@ -193,7 +214,7 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
             <Waves size={14} color="var(--primary-teal)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.recommendedFreqKhz}</span>
+            <span className="metric-card-number">{hasCalculated ? results.recommendedFreqKhz : 0}</span>
             <span className="metric-card-unit">kHz</span>
           </div>
           <div className="metric-card-footnote text-savings">
@@ -207,7 +228,7 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
             <Activity size={14} color="var(--mint-green-dark)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{(results.achievableRangeResolutionM * 100).toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? (results.achievableRangeResolutionM * 100).toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">cm</span>
           </div>
           <div className="metric-card-footnote">
@@ -221,11 +242,11 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
             <Activity size={14} color="var(--accent-cyan)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.effectiveAlpha_dB_km.toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? results.effectiveAlpha_dB_km.toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">dB/km</span>
           </div>
           <div className="metric-card-footnote">
-            <span>Round-Trip 2TL: {results.twoWayTL.toFixed(1)} dB</span>
+            <span>Round-Trip 2TL: {hasCalculated ? results.twoWayTL.toFixed(1) : '0.0'} dB</span>
           </div>
         </div>
 
@@ -235,7 +256,7 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
             <Zap size={14} color="var(--primary-teal)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.requiredTransmitterPowerW.toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? results.requiredTransmitterPowerW.toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">W</span>
           </div>
           <div className="metric-card-footnote text-savings">
@@ -249,11 +270,11 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
             <Zap size={14} color="var(--accent-cyan)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.totalAverageSystemPowerW.toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? results.totalAverageSystemPowerW.toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">W</span>
           </div>
           <div className="metric-card-footnote text-savings">
-            <span>Baseline: {results.baselineAvgPowerW.toFixed(1)} W</span>
+            <span>Baseline: {hasCalculated ? results.baselineAvgPowerW.toFixed(1) : '0.0'} W</span>
           </div>
         </div>
 
@@ -263,11 +284,11 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
             <Battery size={14} color="var(--mint-green)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.usableBatteryEnergyWh.toFixed(0)}</span>
+            <span className="metric-card-number">{hasCalculated ? results.usableBatteryEnergyWh.toFixed(0) : 0}</span>
             <span className="metric-card-unit">Wh</span>
           </div>
           <div className="metric-card-footnote">
-            <span>Nominal: {results.nominalBatteryEnergyWh} Wh</span>
+            <span>Nominal: {hasCalculated ? results.nominalBatteryEnergyWh : 0} Wh</span>
           </div>
         </div>
 
@@ -277,7 +298,7 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
             <Clock size={14} color="var(--mint-green-dark)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.estimatedRuntimeHours.toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? results.estimatedRuntimeHours.toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">hrs</span>
           </div>
           <div className="metric-card-footnote text-savings">
@@ -291,7 +312,7 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
             <Battery size={14} color="var(--primary-teal)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.estimatedMissionEnergyWh.toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? results.estimatedMissionEnergyWh.toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">Wh</span>
           </div>
           <div className="metric-card-footnote">
@@ -305,7 +326,7 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
             <ShieldCheck size={14} color="var(--mint-green-dark)" />
           </div>
           <div className="metric-card-val-row">
-            <span className="metric-card-number">{results.powerSavingPct.toFixed(1)}</span>
+            <span className="metric-card-number">{hasCalculated ? results.powerSavingPct.toFixed(1) : '0.0'}</span>
             <span className="metric-card-unit">%</span>
           </div>
           <div className="metric-card-footnote text-savings">
@@ -372,6 +393,17 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
             <line x1="50" y1="110" x2="480" y2="110" stroke="#f1f5f9" />
             <line x1="50" y1="155" x2="480" y2="155" stroke="#cbd5e1" strokeWidth="1.2" />
 
+            {(!hasCalculated || results.totalAverageSystemPowerW <= 0) ? (
+              <g>
+                <text x="265" y="85" fill="#64748b" fontSize="12" fontFamily="monospace" textAnchor="middle" fontWeight="bold">
+                  EMPTY GRAPH — ZERO STATE
+                </text>
+                <text x="265" y="110" fill="#94a3b8" fontSize="10" textAnchor="middle">
+                  Configure inputs and click 'Calculate Sonar Performance' on Page 1 to generate performance visualizations
+                </text>
+              </g>
+            ) : (
+              <>
             {/* CHART A: Fixed vs Adaptive Power */}
             {activeChart === 'power' && (
               <g>
@@ -536,6 +568,8 @@ export default function Dashboard({ onNavigateToInputs, onNavigateToAnalysis, on
                   );
                 })()}
               </g>
+            )}
+              </>
             )}
           </svg>
         </div>

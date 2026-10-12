@@ -8,74 +8,145 @@ import { supabase } from './supabaseClient';
 
 export const SonarContext = createContext();
 
-export const DEFAULT_CONFIG = {
+// All numerical input fields initially display 0
+export const ZERO_CONFIG = {
   // 1. Environmental Inputs
-  depthM: 60,              // Water depth in meters (0 to 1000)
-  turbidityNtu: 15,        // Turbidity in NTU (0 to 100)
-  tempC: 14,               // Temperature in °C (0 to 35)
-  salinityPsu: 35,         // Salinity in PSU (0 to 45)
-  soundSpeedManual: null,  // Editable m/s (null = auto from Mackenzie formula)
-  attenuationManual: null, // Editable dB/km (null = auto from Francois-Garrison)
+  depthM: 0,
+  turbidityNtu: 0,
+  tempC: 0,
+  salinityPsu: 0,
+  soundSpeedManual: null,
+  attenuationManual: null,
 
   // 2. Sonar Configuration
-  minFreqKhz: 100,         // Min freq in kHz (default 100)
-  maxFreqKhz: 500,         // Max freq in kHz (default 500)
-  targetDistanceM: 120,    // Target distance in meters (10 to 500)
-  desiredRangeResM: 0.05,  // Desired range resolution in meters (e.g. 0.05m = 5cm)
-  chirpBandwidthKhz: 50,   // Chirp bandwidth in kHz (constrained by maxFreq - minFreq)
-  pulseDurationMs: 15,     // Pulse duration in ms (1 to 50)
-  transmissionMode: 'Pulsed', // 'Pulsed' | 'Continuous'
-  transmitPowerLimitW: 80, // Power limit in Watts (10 to 100)
-  targetStrengthDb: -10,   // TS in dB (Standard composite hull / rock return)
-  receiverSensitivityDb: -160, // Hydrophone sensitivity (dB re 1V/uPa)
+  minFreqKhz: 0,
+  maxFreqKhz: 0,
+  targetDistanceM: 0,
+  desiredRangeResM: 0,
+  chirpBandwidthKhz: 0,
+  pulseDurationMs: 0,
+  transmissionMode: 'Pulsed',
+  transmitPowerLimitW: 0,
+  targetStrengthDb: 0,
+  receiverSensitivityDb: 0,
 
   // 3. Battery and Power Inputs
-  batteryVoltageV: 48,     // Battery voltage (V, default 48V)
-  batteryCapacityAh: 10,   // Battery capacity (Ah, default 10Ah)
-  usableCapacityPct: 90,   // Usable capacity % (90% DoD for Li-ion safety)
-  desiredMissionHours: 8,  // Desired mission duration in hours (default 8h)
-  amplifierEfficiencyPct: 82, // Class D amplifier efficiency % (default 82%)
-  electronicsPowerW: 8.5,  // Electronics and sensors power consumption (Watts)
-  dutyCyclePct: 20         // Transmission duty cycle % for pulsed operation (default 20%)
+  batteryVoltageV: 0,
+  batteryCapacityAh: 0,
+  usableCapacityPct: 0,
+  desiredMissionHours: 0,
+  amplifierEfficiencyPct: 0,
+  electronicsPowerW: 0,
+  dutyCyclePct: 0
+};
+
+// Initial zero-state results before calculation
+export const ZERO_RESULTS = {
+  hasCalculated: false,
+  isOutdated: false,
+  effectiveSoundSpeed: 0,
+  calculatedSoundSpeed: 0,
+  minF: 0,
+  maxF: 0,
+  maxAvailableBandwidth: 0,
+  effectiveBandwidthKhz: 0,
+  recommendedFreqKhz: 0,
+  effectiveAlpha_dB_km: 0,
+  effectiveAlpha_dB_m: 0,
+  calculatedAlpha_dB_km: 0,
+  requiredBandwidthKhz: 0,
+  achievableRangeResolutionM: 0,
+  satisfiesResolution: false,
+  oneWayTL: 0,
+  twoWayTL: 0,
+  processingGain: 0,
+  requiredSL: 0,
+  requiredTransmitterPowerW: 0,
+  isPowerWithinLimit: false,
+  activeTransmitPowerW: 0,
+  nominalBatteryEnergyWh: 0,
+  usableBatteryEnergyWh: 0,
+  effectiveDutyCycle: 0,
+  txElectricalPowerDuringPulseW: 0,
+  averageTransmitPowerW: 0,
+  amplifierLossesW: 0,
+  electronicsPowerW: 0,
+  totalAverageSystemPowerW: 0,
+  estimatedRuntimeHours: 0,
+  energyConsumedPerHourWh: 0,
+  estimatedMissionEnergyWh: 0,
+  remainingBatteryEnergyWh: 0,
+  meetsMissionDuration: false,
+  baselineAvgPowerW: 0,
+  baselineRuntimeHours: 0,
+  baselineMissionEnergyWh: 0,
+  powerSavingPct: 0,
+  energySavingPct: 0,
+  candidateFrequencies: [],
+  feasibilityStatus: 'Not calculated',
+  feasibilityExplanation: 'Enter environmental and sonar parameters above and click Calculate to run the simulation.',
+  calculationTimestamp: 0
 };
 
 export function SonarProvider({ children }) {
   const [config, setConfig] = useState(() => {
     try {
-      const saved = sessionStorage.getItem('auv_sonar_config_v1');
+      const saved = sessionStorage.getItem('auv_sonar_config_zero_v1');
       if (saved) {
-        return { ...DEFAULT_CONFIG, ...JSON.parse(saved) };
+        return { ...ZERO_CONFIG, ...JSON.parse(saved) };
       }
     } catch (e) {
       console.warn('Could not read sessionStorage', e);
     }
-    return DEFAULT_CONFIG;
+    return ZERO_CONFIG;
   });
 
+  const [hasCalculated, setHasCalculated] = useState(() => {
+    try {
+      return sessionStorage.getItem('auv_sonar_has_calculated_v1') === 'true';
+    } catch (e) {
+      return false;
+    }
+  });
+
+  const [isOutdated, setIsOutdated] = useState(false);
   const [isCalculating, setIsCalculating] = useState(false);
-  const [calculationTimestamp, setCalculationTimestamp] = useState(0);
+  const [calculationTimestamp, setCalculationTimestamp] = useState(() => hasCalculated ? Date.now() : 0);
 
   // Save to sessionStorage when config changes
   useEffect(() => {
     try {
-      sessionStorage.setItem('auv_sonar_config_v1', JSON.stringify(config));
+      sessionStorage.setItem('auv_sonar_config_zero_v1', JSON.stringify(config));
+      sessionStorage.setItem('auv_sonar_has_calculated_v1', hasCalculated ? 'true' : 'false');
     } catch (e) {
       console.warn('Could not write to sessionStorage', e);
     }
-  }, [config]);
+  }, [config, hasCalculated]);
 
-  // Update specific input field
+  // Update specific input field and mark output as outdated if changed after calculation
   const updateConfig = (key, value) => {
     setConfig(prev => ({ ...prev, [key]: value }));
+    if (hasCalculated) {
+      setIsOutdated(true);
+    }
   };
 
   const updateMultipleConfig = (updates) => {
     setConfig(prev => ({ ...prev, ...updates }));
+    if (hasCalculated) {
+      setIsOutdated(true);
+    }
   };
 
   const resetToDefaults = () => {
-    setConfig(DEFAULT_CONFIG);
-    setCalculationTimestamp(Date.now());
+    setConfig(ZERO_CONFIG);
+    setHasCalculated(false);
+    setIsOutdated(false);
+    setCalculationTimestamp(0);
+    try {
+      sessionStorage.removeItem('auv_sonar_config_zero_v1');
+      sessionStorage.removeItem('auv_sonar_has_calculated_v1');
+    } catch (e) {}
   };
 
   const triggerCalculate = async () => {
@@ -83,6 +154,8 @@ export function SonarProvider({ children }) {
     setTimeout(async () => {
       const now = Date.now();
       setCalculationTimestamp(now);
+      setHasCalculated(true);
+      setIsOutdated(false);
       setIsCalculating(false);
 
       // Persist simulation record to Supabase database (non-blocking)
@@ -103,14 +176,17 @@ export function SonarProvider({ children }) {
           }
         ]);
       } catch (err) {
-        // Silently catch if table not yet migrated, preserving 100% UI stability
         console.info('Supabase simulation log notice:', err);
       }
     }, 350);
   };
 
-  // Perform All Real Scientific Calculations Driven by config
+  // Perform All Real Scientific Calculations Driven by current config
   const results = useMemo(() => {
+    if (!hasCalculated) {
+      return ZERO_RESULTS;
+    }
+
     // 1. Environmental sound speed
     const calculatedSoundSpeed = calculateSoundSpeed(config.tempC, config.salinityPsu, config.depthM);
     const effectiveSoundSpeed = (config.soundSpeedManual !== null && !isNaN(config.soundSpeedManual) && config.soundSpeedManual > 1000) 
@@ -118,14 +194,12 @@ export function SonarProvider({ children }) {
       : calculatedSoundSpeed;
 
     // 2. Frequency Range and Bandwidth constraints
-    const minF = Math.max(10, Math.min(config.minFreqKhz, config.maxFreqKhz - 10));
-    const maxF = Math.max(minF + 10, config.maxFreqKhz);
-    const maxAvailableBandwidth = maxF - minF;
+    const minF = Math.max(1, Math.min(config.minFreqKhz, config.maxFreqKhz > 1 ? config.maxFreqKhz - 1 : 1));
+    const maxF = Math.max(minF + 1, config.maxFreqKhz);
+    const maxAvailableBandwidth = Math.max(0, maxF - minF);
     const effectiveBandwidthKhz = Math.min(config.chirpBandwidthKhz, maxAvailableBandwidth);
 
     // 3. Recommended / Optimal Operating Frequency
-    // Model rule from PDF: In murky water (turbidity) or long range, downshift towards minFreqKhz (100 kHz).
-    // In clear near-field, scale up towards maxFreqKhz (500 kHz).
     const rangeFactor = Math.min(1, Math.max(0, (config.targetDistanceM - 10) / 490));
     const turbFactor = Math.min(1, Math.max(0, config.turbidityNtu / 100));
     const penalty = 0.60 * rangeFactor + 0.40 * turbFactor;
@@ -150,7 +224,7 @@ export function SonarProvider({ children }) {
     const requiredBandwidthForDesiredResHz = effectiveSoundSpeed / (2 * Math.max(0.001, config.desiredRangeResM));
     const requiredBandwidthKhz = requiredBandwidthForDesiredResHz / 1000;
     const achievableRangeResolutionM = effectiveSoundSpeed / (2 * Math.max(1000, bandwidthHz));
-    const satisfiesResolution = achievableRangeResolutionM <= config.desiredRangeResM * 1.05; // 5% tolerance
+    const satisfiesResolution = config.desiredRangeResM > 0 && achievableRangeResolutionM <= config.desiredRangeResM * 1.05;
 
     // 6. Transmission Loss: 20*log10(R) + alpha * R
     const r = Math.max(1, config.targetDistanceM);
@@ -158,22 +232,19 @@ export function SonarProvider({ children }) {
     const twoWayTL = 2 * oneWayTL;
 
     // 7. Transmit Power Estimation & Sonar Equation
-    const ampEfficiency = Math.max(0.5, config.amplifierEfficiencyPct / 100);
-    // Transmit power scales dynamically to compensate for two-way transmission loss (2TL) and target strength:
-    // Calibrated sonar equation model: scales smoothly across 5W (close range) to 80W+ (long range/high loss)
-    const tauSec = Math.max(0.001, config.pulseDurationMs / 1000);
-    const processingGain = 10 * Math.log10(Math.max(1, bandwidthHz * tauSec));
+    const ampEfficiency = Math.max(0.1, config.amplifierEfficiencyPct > 0 ? config.amplifierEfficiencyPct / 100 : 0.82);
     const targetSNR = 20.0;
     const ambientNoiseNL = 45.0;
+    const tauSec = Math.max(0.001, config.pulseDurationMs / 1000);
+    const processingGain = 10 * Math.log10(Math.max(1, bandwidthHz * tauSec));
     const requiredSL = targetSNR + ambientNoiseNL - processingGain + twoWayTL - config.targetStrengthDb;
-    
-    // Dynamic acoustic power requirement derived from path loss 2TL:
-    const scaledPwr = 8.0 * Math.pow(10, (twoWayTL - 80.0) / 45.0);
-    const requiredTransmitterPowerW = Math.max(5.0, Math.round(scaledPwr * 10) / 10);
-    const isPowerWithinLimit = requiredTransmitterPowerW <= config.transmitPowerLimitW;
+    const requiredPAcoustic = Math.pow(10, (requiredSL - 185.8) / 10);
+    const requiredTransmitterPowerW = Math.max(1, Math.min(250, requiredPAcoustic / 0.5));
+    const isPowerWithinLimit = config.transmitPowerLimitW > 0 && requiredTransmitterPowerW <= config.transmitPowerLimitW;
 
-    // Operating transmit power clamped to hardware limit
-    const activeTransmitPowerW = Math.min(config.transmitPowerLimitW, requiredTransmitterPowerW);
+    const activeTransmitPowerW = config.transmitPowerLimitW > 0 
+      ? Math.min(config.transmitPowerLimitW, requiredTransmitterPowerW)
+      : requiredTransmitterPowerW;
 
     // 8. Battery Energy Calculation
     const nominalBatteryEnergyWh = config.batteryVoltageV * config.batteryCapacityAh;
@@ -188,20 +259,20 @@ export function SonarProvider({ children }) {
     const totalAverageSystemPowerW = averageTransmitPowerW + electronicsPowerW;
 
     // Battery Runtime & Mission Energy
-    const estimatedRuntimeHours = usableBatteryEnergyWh / Math.max(0.5, totalAverageSystemPowerW);
+    const estimatedRuntimeHours = totalAverageSystemPowerW > 0 ? (usableBatteryEnergyWh / totalAverageSystemPowerW) : 0;
     const energyConsumedPerHourWh = totalAverageSystemPowerW;
     const estimatedMissionEnergyWh = totalAverageSystemPowerW * config.desiredMissionHours;
     const remainingBatteryEnergyWh = Math.max(0, usableBatteryEnergyWh - estimatedMissionEnergyWh);
-    const meetsMissionDuration = estimatedRuntimeHours >= config.desiredMissionHours;
+    const meetsMissionDuration = config.desiredMissionHours > 0 && estimatedRuntimeHours >= config.desiredMissionHours;
 
-    // 10. Fixed Baseline Comparison (Continuous full power or 80W fixed baseline)
-    const baselineTxPowerW = 80;
+    // 10. Fixed Baseline Comparison (80W baseline or configured max)
+    const baselineTxPowerW = Math.max(50, config.transmitPowerLimitW || 80);
     const baselineTxElectricalW = baselineTxPowerW / ampEfficiency;
     const baselineAvgPowerW = (baselineTxElectricalW * (config.transmissionMode === 'Continuous' ? 1.0 : 0.25)) + electronicsPowerW;
-    const baselineRuntimeHours = usableBatteryEnergyWh / Math.max(0.5, baselineAvgPowerW);
+    const baselineRuntimeHours = baselineAvgPowerW > 0 ? (usableBatteryEnergyWh / baselineAvgPowerW) : 0;
     const baselineMissionEnergyWh = baselineAvgPowerW * config.desiredMissionHours;
-    const powerSavingPct = ((baselineAvgPowerW - totalAverageSystemPowerW) / baselineAvgPowerW) * 100;
-    const energySavingPct = ((baselineMissionEnergyWh - estimatedMissionEnergyWh) / baselineMissionEnergyWh) * 100;
+    const powerSavingPct = baselineAvgPowerW > 0 ? Math.max(0, ((baselineAvgPowerW - totalAverageSystemPowerW) / baselineAvgPowerW) * 100) : 0;
+    const energySavingPct = baselineMissionEnergyWh > 0 ? Math.max(0, ((baselineMissionEnergyWh - estimatedMissionEnergyWh) / baselineMissionEnergyWh) * 100) : 0;
 
     // 11. Feasibility Assessment
     let feasibilityStatus = 'Feasible under current model assumptions';
@@ -224,6 +295,8 @@ export function SonarProvider({ children }) {
     const candidateFrequencies = evaluateCandidateFrequencies(config, effectiveSoundSpeed);
 
     return {
+      hasCalculated: true,
+      isOutdated,
       candidateFrequencies,
       effectiveSoundSpeed,
       calculatedSoundSpeed,
@@ -267,7 +340,7 @@ export function SonarProvider({ children }) {
       feasibilityExplanation,
       calculationTimestamp
     };
-  }, [config, calculationTimestamp]);
+  }, [config, calculationTimestamp, hasCalculated, isOutdated]);
 
   return (
     <SonarContext.Provider value={{
@@ -277,6 +350,8 @@ export function SonarProvider({ children }) {
       resetToDefaults,
       triggerCalculate,
       isCalculating,
+      hasCalculated,
+      isOutdated,
       results
     }}>
       {children}
