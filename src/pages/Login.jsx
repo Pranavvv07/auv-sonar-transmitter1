@@ -26,11 +26,12 @@ export default function Login({ onLogin }) {
       });
 
       if (data?.user) {
-        onLogin({
-          name: data.user.user_metadata?.full_name || email.split('@')[0],
-          email: data.user.email,
-          callsign: 'ORCA-LEAD-01'
-        });
+        // If user not yet registered in Supabase auth, authenticate locally as operator
+onLogin({
+  name: email.split('@')[0].toUpperCase(),
+  email: email,
+  callsign: 'ORCA-LEAD-01'
+});
         setLoading(false);
         return;
       }
