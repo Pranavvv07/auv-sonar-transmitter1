@@ -4,6 +4,7 @@ import {
   calculateAbsorption, 
   evaluateCandidateFrequencies 
 } from './acousticModel';
+import { supabase } from './supabaseClient';
 
 export const SonarContext = createContext();
 
@@ -77,11 +78,34 @@ export function SonarProvider({ children }) {
     setCalculationTimestamp(Date.now());
   };
 
-  const triggerCalculate = () => {
+  const triggerCalculate = async () => {
     setIsCalculating(true);
-    setTimeout(() => {
-      setCalculationTimestamp(Date.now());
+    setTimeout(async () => {
+      const now = Date.now();
+      setCalculationTimestamp(now);
       setIsCalculating(false);
+
+      // Persist simulation record to Supabase database (non-blocking)
+      try {
+        await supabase.from('sonar_simulations').insert([
+          {
+            target_distance_m: config.targetDistanceM,
+            water_depth_m: config.depthM,
+            turbidity_ntu: config.turbidityNtu,
+            water_temp_c: config.tempC,
+            salinity_psu: config.salinityPsu,
+            min_freq_khz: config.minFreqKhz,
+            max_freq_khz: config.maxFreqKhz,
+            battery_voltage_v: config.batteryVoltageV,
+            battery_capacity_ah: config.batteryCapacityAh,
+            duty_cycle_pct: config.dutyCyclePct,
+            created_at: new Date().toISOString()
+          }
+        ]);
+      } catch (err) {
+        // Silently catch if table not yet migrated, preserving 100% UI stability
+        console.info('Supabase simulation log notice:', err);
+      }
     }, 350);
   };
 

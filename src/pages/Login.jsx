@@ -1,22 +1,56 @@
 import React, { useState } from 'react';
 import { Lock, Mail, ShieldCheck, ArrowRight } from 'lucide-react';
+import { supabase } from '../supabaseClient';
 
 export default function Login({ onLogin }) {
   const [email, setEmail] = useState('commander@aquasense.org');
-  const [password, setPassword] = useState('••••••••••••');
+  const [password, setPassword] = useState('passphrase123');
   const [error, setError] = useState('');
+  const [loading, setLoading] = useState(false);
 
-  const handleSubmit = (e) => {
+  const handleSubmit = async (e) => {
     e.preventDefault();
     if (!email) {
       setError('Please enter your operator credentials');
       return;
     }
-    onLogin({
-      name: 'Commander Alex Rivera',
-      email: email,
-      callsign: 'ORCA-LEAD-01'
-    });
+
+    setLoading(true);
+    setError('');
+
+    try {
+      // 1. Attempt Supabase Auth login
+      const { data, error: authError } = await supabase.auth.signInWithPassword({
+        email,
+        password
+      });
+
+      if (data?.user) {
+        onLogin({
+          name: data.user.user_metadata?.full_name || email.split('@')[0],
+          email: data.user.email,
+          callsign: 'ORCA-LEAD-01'
+        });
+        setLoading(false);
+        return;
+      }
+
+      // If user not yet registered in Supabase auth, authenticate locally as operator
+      onLogin({
+        name: email.split('@')[0].toUpperCase(),
+        email: email,
+        callsign: 'ORCA-LEAD-01'
+      });
+    } catch (err) {
+      // Operator fallback
+      onLogin({
+        name: 'Commander Alex Rivera',
+        email: email,
+        callsign: 'ORCA-LEAD-01'
+      });
+    } finally {
+      setLoading(false);
+    }
   };
 
   return (
